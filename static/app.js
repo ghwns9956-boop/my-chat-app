@@ -23,13 +23,44 @@ const zoomedImage = document.getElementById('zoomed-image');
 const closeZoomBtn = document.getElementById('close-zoom-btn');
 const bossKeyOverlay = document.getElementById('boss-key-overlay');
 const secretBtn = document.getElementById('secret-btn');
+const clearChatBtn = document.getElementById('clear-chat-btn');
 
 let ws = null;
-let currentUsername = '';
+let currentUsername = localStorage.getItem('chat_username') || '';
 let typingTimeout = null;
 let activeTypers = new Set();
 let currentRoomName = "글로벌 채팅방";
 let isSecretMode = false;
+let localHistory = JSON.parse(localStorage.getItem('chat_history')) || [];
+
+// 오디오 컨텍스트 (알림음용)
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+function playBeep() {
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    const oscillator = audioCtx.createOscillator();
+    const gainNode = audioCtx.createGain();
+    
+    oscillator.type = 'sine';
+    oscillator.frequency.setValueAtTime(880, audioCtx.currentTime); // A5 note
+    oscillator.frequency.exponentialRampToValueAtTime(1760, audioCtx.currentTime + 0.1); // Slide to A6
+    
+    gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+    
+    oscillator.connect(gainNode);
+    gainNode.connect(audioCtx.destination);
+    
+    oscillator.start();
+    oscillator.stop(audioCtx.currentTime + 0.1);
+}
+
+// 화면 진입 시 자동 로그인 처리
+window.addEventListener('DOMContentLoaded', () => {
+    if (currentUsername) {
+        usernameInput.value = currentUsername;
+        connectWebSocket(currentUsername);
+    }
+});
 
 // 알림 관련 변수
 let unreadCount = 0;
@@ -105,6 +136,7 @@ loginForm.addEventListener('submit', (e) => {
     const username = usernameInput.value.trim();
     if (username) {
         currentUsername = username;
+        localStorage.setItem('chat_username', username);
         connectWebSocket(username);
     }
 });
@@ -114,6 +146,7 @@ renameBtn.addEventListener('click', () => {
     const newName = prompt("새로운 닉네임을 입력하세요:", currentUsername);
     if (newName && newName.trim() !== "" && newName !== currentUsername) {
         currentUsername = newName.trim();
+        localStorage.setItem('chat_username', currentUsername);
         if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: "rename", new_username: currentUsername }));
         }
@@ -147,6 +180,18 @@ function connectWebSocket(username) {
         loginScreen.classList.remove('active');
         chatScreen.classList.add('active');
         messageInput.focus();
+        
+        // 로컬 채팅 기록 복원
+        chatMessages.innerHTML = '';
+        const systemMsg = document.createElement('div');
+        systemMsg.className = 'system-message';
+        systemMsg.textContent = '환영합니다! 채팅을 시작해보세요.';
+        chatMessages.appendChild(systemMsg);
+        
+        localHistory.forEach(msgData => {
+            renderMessage(msgData, false);
+        });
+        scrollToBottom();
     };
 
     ws.onmessage = (event) => {
@@ -170,20 +215,28 @@ function connectWebSocket(username) {
         } else if (data.type === 'reaction') {
             handleReaction(data.msgId, data.emoji);
         } else if (data.type === 'secret_chat') {
-            appendChatMessage(data);
+            renderMessage(data, true);
+        } else if (data.type === 'effect') {
+            handleEffect(data.effect, data.sender);
         }
         
-        // 데스크톱 알림 표시 (내가 보낸 게 아니고 창이 숨겨져 있을 때)
-        if (document.hidden && data.type !== 'system' && data.type !== 'users_count' && data.type !== 'typing' && data.type !== 'room_name_changed' && data.type !== 'reaction') {
-            if (data.sender !== currentUsername && "Notification" in window && Notification.permission === "granted") {
-                let notiBody = data.message;
-                if (data.type === 'image') notiBody = "📸 사진을 보냈습니다.";
-                if (data.type === 'secret_chat') notiBody = "🔒 시크릿 메시지를 보냈습니다.";
+        // 데스크톱 알림 및 소리 재생
+        if (data.type === 'chat' || data.type === 'image' || data.type === 'secret_chat' || data.type === 'effect') {
+            if (data.sender !== currentUsername) {
+                // 비활성 탭일 때만 소리 재생
+                if (document.hidden) playBeep();
                 
-                new Notification(currentRoomName, {
-                    body: `${data.sender}: ${notiBody}`,
-                    icon: 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>💬</text></svg>'
-                });
+                if (document.hidden && "Notification" in window && Notification.permission === "granted") {
+                    let notiBody = data.message || "새로운 이벤트";
+                    if (data.type === 'image') notiBody = "📸 사진을 보냈습니다.";
+                    if (data.type === 'secret_chat') notiBody = "🔒 시크릿 메시지를 보냈습니다.";
+                    if (data.type === 'effect') notiBody = `✨ ${data.effect} 효과를 보냈습니다!`;
+                    
+                    new Notification(currentRoomName, {
+                        body: `${data.sender}: ${notiBody}`,
+                        icon: 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>💬</text></svg>'
+                    });
+                }
             }
         }
     };
@@ -356,8 +409,14 @@ function handleSlashCommand(message) {
         } else {
             resultMsg = `[미니게임] 🔫 러시안 룰렛 결과: 찰칵. 휴... 살았습니다. 😌`;
         }
+    } else if (cmd === '/흔들기') {
+        ws.send(JSON.stringify({ type: "effect", effect: "shake" }));
+        return;
+    } else if (cmd === '/폭죽') {
+        ws.send(JSON.stringify({ type: "effect", effect: "confetti" }));
+        return;
     } else {
-        resultMsg = `[시스템] 알 수 없는 명령어입니다. (가능: /주사위, /사다리, /점메추, /동전, /가위바위보, /로또, /운세, /러시안룰렛)`;
+        resultMsg = `[시스템] 알 수 없는 명령어입니다. (가능: /주사위, /사다리, /점메추, /동전, /가위바위보, /로또, /운세, /러시안룰렛, /흔들기, /폭죽)`;
     }
     
     // 미니게임 결과를 내 채팅으로 전송
@@ -374,9 +433,18 @@ function logout() {
     }
     chatScreen.classList.remove('active');
     loginScreen.classList.add('active');
-    usernameInput.value = '';
+    localStorage.removeItem('chat_username'); // 명시적 나가기 시 닉네임 지우기
     currentUsername = '';
 }
+
+// 로컬 기록 지우기 (휴지통 버튼)
+clearChatBtn.addEventListener('click', () => {
+    if (confirm("내 화면의 모든 대화 기록을 지우시겠습니까?\n(상대방의 화면에서는 지워지지 않습니다.)")) {
+        localHistory = [];
+        localStorage.removeItem('chat_history');
+        chatMessages.innerHTML = '<div class="system-message">대화 기록이 모두 삭제되었습니다.</div>';
+    }
+});
 
 // UI 업데이트 함수들
 function appendSystemMessage(msg) {
@@ -389,6 +457,7 @@ function appendSystemMessage(msg) {
 
 // 닉네임을 기반으로 고유한 HSL 색상 생성 (파스텔톤 계열로 가독성 높임)
 function getStringColor(str) {
+    if (!str) return 'hsl(0, 0%, 50%)';
     let hash = 0;
     for (let i = 0; i < str.length; i++) {
         hash = str.charCodeAt(i) + ((hash << 5) - hash);
@@ -397,19 +466,36 @@ function getStringColor(str) {
     return `hsl(${h}, 70%, 75%)`; // 밝고 채도 있는 색상
 }
 
+// 메시지 렌더링 통합 (기록 저장용 파라미터 추가)
 function appendChatMessage(data) {
+    renderMessage(data, true);
+}
+
+function renderMessage(data, saveToLocal) {
     const isSelf = data.sender === currentUsername;
     const wrapper = document.createElement('div');
     wrapper.className = `message-wrapper ${isSelf ? 'self' : 'other'}`;
+    
+    // 로컬 스토리지 저장 (일반 채팅만 저장, 시크릿이나 이미지는 휘발성 유지)
+    if (saveToLocal && data.type === 'chat') {
+        localHistory.push(data);
+        if (localHistory.length > 200) localHistory.shift(); // 200개 제한
+        localStorage.setItem('chat_history', JSON.stringify(localHistory));
+    }
 
     let infoHtml = '';
     if (!isSelf) {
         const nameColor = getStringColor(data.sender);
-        infoHtml = `<div class="message-info">
-                        <span class="sender-name" style="color: ${nameColor}">${escapeHTML(data.sender)}</span>
-                        <span class="time">${data.time}</span>
-                    </div>`;
-        updateNotificationBadge(); // 다른 사람의 메시지일 때 알림 업데이트
+        const initial = data.sender ? data.sender.charAt(0).toUpperCase() : '?';
+        infoHtml = `
+            <div class="avatar" style="background-color: ${nameColor}; color: #1e293b; font-weight: bold;">
+                ${initial}
+            </div>
+            <div class="message-info">
+                <span class="sender-name" style="color: ${nameColor}">${escapeHTML(data.sender || 'Unknown')}</span>
+                <span class="time">${data.time}</span>
+            </div>`;
+        if (saveToLocal) updateNotificationBadge();
     } else {
         infoHtml = `<div class="message-info">
                         <span class="time">${data.time}</span>
@@ -490,6 +576,35 @@ function handleReaction(msgId, emoji) {
         } else {
             badge.textContent = badge.textContent ? `${badge.textContent} ${emoji}` : emoji;
         }
+    }
+}
+
+// 특수 효과 처리
+function handleEffect(effect, sender) {
+    if (effect === 'shake') {
+        document.body.classList.add('shake-animation');
+        setTimeout(() => document.body.classList.remove('shake-animation'), 500);
+        appendSystemMessage(`🫨 ${sender}님이 채팅방을 흔들었습니다!`);
+        if ("vibrate" in navigator) navigator.vibrate(200);
+    } else if (effect === 'confetti') {
+        createConfetti();
+        appendSystemMessage(`🎉 ${sender}님이 폭죽을 터뜨렸습니다!`);
+    }
+}
+
+// 폭죽 파티클 애니메이션
+function createConfetti() {
+    const colors = ['#f87171', '#fbbf24', '#34d399', '#60a5fa', '#a78bfa', '#f472b6'];
+    for (let i = 0; i < 50; i++) {
+        const confetti = document.createElement('div');
+        confetti.className = 'confetti-particle';
+        confetti.style.left = Math.random() * 100 + 'vw';
+        confetti.style.backgroundColor = colors[Math.floor(Math.random() * colors.length)];
+        confetti.style.animationDuration = (Math.random() * 2 + 2) + 's';
+        confetti.style.opacity = Math.random() + 0.5;
+        document.body.appendChild(confetti);
+        
+        setTimeout(() => confetti.remove(), 4000);
     }
 }
 

@@ -162,6 +162,18 @@ async def websocket_endpoint(websocket: WebSocket, username: str):
                     for connection in manager.active_connections:
                         await connection["ws"].send_text(data)
                         
+                elif event_type == "effect":
+                    # 흔들기, 폭죽 등 클라이언트 특수 효과 브로드캐스트
+                    effect_name = parsed_data.get("effect")
+                    current_username = next(conn["username"] for conn in manager.active_connections if conn["ws"] == websocket)
+                    data = json.dumps({
+                        "type": "effect",
+                        "effect": effect_name,
+                        "sender": current_username
+                    })
+                    for connection in manager.active_connections:
+                        await connection["ws"].send_text(data)
+
                 elif event_type == "reaction":
                     msg_id = parsed_data.get("msgId")
                     emoji = parsed_data.get("emoji")

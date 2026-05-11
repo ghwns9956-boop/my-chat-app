@@ -31,28 +31,20 @@
                 <div class="drag-message">📸 여기에 사진을 놓아 전송하세요!</div>
             </div>
             
-            <div class="chat-header">
+            <header class="chat-header">
                 <div class="header-info">
-                    <div class="room-title-container">
-                        <h2 id="room-name-display">글로벌 채팅방</h2>
-                        <button id="edit-room-name-btn" class="room-edit-btn" title="방 이름 변경">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
-                        </button>
-                    </div>
-                    <span class="status"><span class="dot"></span><span id="user-count-display">온라인</span></span>
+                    <h2 id="room-name-display">글로벌 채팅방</h2>
+                    <button type="button" id="edit-room-name-btn" class="icon-btn" title="방 이름 변경">✏️</button>
+                    <span id="user-count-display" class="user-count">온라인: 1명</span>
                 </div>
                 <div class="header-actions">
-                    <button id="rename-btn" class="icon-btn" title="닉네임 변경">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
-                    </button>
-                    <button id="edit-room-name-btn" class="room-edit-btn" title="방 이름 변경">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
-                    </button>
-                    <button id="logout-btn" class="icon-btn" title="나가기">
+                    <button type="button" id="clear-chat-btn" class="icon-btn danger-btn" title="내 화면의 모든 대화 기록 싹 지우기">🗑️</button>
+                    <button type="button" id="rename-btn" class="icon-btn" title="내 닉네임 변경">👤</button>
+                    <button type="button" id="logout-btn" class="logout-btn" title="나가기">
                         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
                     </button>
                 </div>
-            </div>
+            </header>
             
             <div id="chat-messages" class="chat-messages">
                 <!-- 메시지들이 여기에 추가됩니다 -->
