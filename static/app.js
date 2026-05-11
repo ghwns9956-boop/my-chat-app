@@ -24,6 +24,10 @@ const closeZoomBtn = document.getElementById('close-zoom-btn');
 const bossKeyOverlay = document.getElementById('boss-key-overlay');
 const secretBtn = document.getElementById('secret-btn');
 const clearChatBtn = document.getElementById('clear-chat-btn');
+const replyingToContainer = document.getElementById('replying-to-container');
+const replyingToName = document.getElementById('replying-to-name');
+const replyingToText = document.getElementById('replying-to-text');
+const cancelReplyBtn = document.getElementById('cancel-reply-btn');
 
 let ws = null;
 let currentUsername = localStorage.getItem('chat_username') || '';
@@ -32,6 +36,7 @@ let activeTypers = new Set();
 let currentRoomName = "글로벌 채팅방";
 let isSecretMode = false;
 let localHistory = JSON.parse(localStorage.getItem('chat_history')) || [];
+let replyingTo = null;
 
 // 오디오 컨텍스트 (알림음용)
 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -315,7 +320,15 @@ chatForm.addEventListener('submit', (e) => {
             // 일반 메시지 또는 시크릿 메시지 전송
             const msgId = 'msg-' + Math.random().toString(36).substr(2, 9);
             const msgType = isSecretMode ? "secret_chat" : "chat";
-            ws.send(JSON.stringify({ type: msgType, message: message, msgId: msgId }));
+            ws.send(JSON.stringify({ 
+                type: msgType, 
+                message: message, 
+                msgId: msgId,
+                replyTo: replyingTo
+            }));
+            
+            // 답장 상태 초기화
+            cancelReply();
         }
         messageInput.value = '';
         
@@ -327,6 +340,32 @@ chatForm.addEventListener('submit', (e) => {
         }
     }
 });
+
+// 답장 취소
+cancelReplyBtn.addEventListener('click', cancelReply);
+
+function cancelReply() {
+    replyingTo = null;
+    replyingToContainer.classList.add('hidden');
+    messageInput.focus();
+}
+
+window.initReply = function(msgId, sender, text) {
+    replyingTo = { msgId, sender, text };
+    replyingToName.textContent = sender;
+    replyingToText.textContent = text.length > 20 ? text.substring(0, 20) + '...' : text;
+    replyingToContainer.classList.remove('hidden');
+    messageInput.focus();
+};
+
+window.scrollToMessage = function(msgId) {
+    const targetEl = document.getElementById(msgId);
+    if (targetEl) {
+        targetEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        targetEl.classList.add('highlight-msg');
+        setTimeout(() => targetEl.classList.remove('highlight-msg'), 1500);
+    }
+};
 
 // 슬래시 명령어 로직
 function handleSlashCommand(message) {
@@ -484,6 +523,7 @@ function renderMessage(data, saveToLocal) {
     }
 
     let infoHtml = '';
+    const safeSender = escapeHTML(data.sender || 'Unknown');
     if (!isSelf) {
         const nameColor = getStringColor(data.sender);
         const initial = data.sender ? data.sender.charAt(0).toUpperCase() : '?';
@@ -492,7 +532,7 @@ function renderMessage(data, saveToLocal) {
                 ${initial}
             </div>
             <div class="message-info">
-                <span class="sender-name" style="color: ${nameColor}">${escapeHTML(data.sender || 'Unknown')}</span>
+                <span class="sender-name" style="color: ${nameColor}">${safeSender}</span>
                 <span class="time">${data.time}</span>
             </div>`;
         if (saveToLocal) updateNotificationBadge();
@@ -504,11 +544,33 @@ function renderMessage(data, saveToLocal) {
 
     let contentHtml = '';
     const msgIdAttr = data.msgId ? `id="${data.msgId}"` : '';
+    const safeMsg = escapeHTML(data.message || '');
+    
+    // 답장할 메시지가 있는 경우 (원본 표시 블록 생성)
+    let replySnippetHtml = '';
+    if (data.replyTo) {
+        replySnippetHtml = `
+            <div class="replied-snippet" onclick="scrollToMessage('${data.replyTo.msgId}')">
+                <span class="replied-sender">${escapeHTML(data.replyTo.sender)}</span>
+                <span class="replied-text">${escapeHTML(data.replyTo.text)}</span>
+            </div>
+        `;
+    }
+    
+    // 답장 버튼 UI (호버 시 나타남)
+    let replyBtnHtml = '';
+    if (data.type === 'chat' && data.msgId) {
+        // 이스케이프 처리된 인자를 전달하여 문법 오류 방지
+        const encodedMsg = encodeURIComponent(data.message);
+        const encodedSender = encodeURIComponent(data.sender);
+        replyBtnHtml = `<button class="reply-btn" title="답장하기" onclick="initReply('${data.msgId}', decodeURIComponent('${encodedSender}'), decodeURIComponent('${encodedMsg}'))">↩️</button>`;
+    }
     
     if (data.type === 'image') {
         // 임시 폭파 사진(Snapchat style) UI 생성
         const imgId = 'img-' + Math.random().toString(36).substr(2, 9);
         contentHtml = `
+            ${replySnippetHtml}
             <div id="btn-${imgId}" class="ephemeral-img-btn" onclick="viewEphemeralImage('${imgId}', '${data.data}')">
                 📸 사진 확인하기 (20초 후 폭파)
             </div>
@@ -516,11 +578,13 @@ function renderMessage(data, saveToLocal) {
                 <img id="view-${imgId}" class="ephemeral-img" src="" alt="첨부 이미지">
                 <div id="timer-${imgId}" class="ephemeral-timer">20s</div>
             </div>
+            ${replyBtnHtml}
         `;
     } else if (data.type === 'secret_chat') {
         const secretId = 'sec-' + Math.random().toString(36).substr(2, 9);
         const encodedMsg = escapeHTML(data.message);
         contentHtml = `
+            ${replySnippetHtml}
             <div id="btn-${secretId}" class="secret-txt-btn" onclick="viewSecretText('${secretId}', '${encodedMsg}')">
                 🔒 시크릿 메시지 확인 (10초)
             </div>
@@ -528,14 +592,21 @@ function renderMessage(data, saveToLocal) {
                 <span id="text-${secretId}"></span>
                 <div id="timer-${secretId}" class="ephemeral-timer" style="top: auto; bottom: -10px; right: -10px;">10s</div>
             </div>
+            ${replyBtnHtml}
         `;
     } else {
-        contentHtml = `<div class="message-bubble" ${msgIdAttr}>${escapeHTML(data.message)}</div>`;
+        contentHtml = `
+            ${replySnippetHtml}
+            <div class="message-bubble" ${msgIdAttr}>${safeMsg}</div>
+            ${replyBtnHtml}
+        `;
     }
 
     wrapper.innerHTML = `
         ${infoHtml}
-        ${contentHtml}
+        <div class="message-content-wrapper">
+            ${contentHtml}
+        </div>
     `;
 
     chatMessages.appendChild(wrapper);

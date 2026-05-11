@@ -351,8 +351,26 @@ button:active {
 
 .sender-name {
     font-weight: 700;
-    font-size: 0.95rem; /* 닉네임 가시성 확보를 위해 크기 키움 */
+    font-size: 0.95rem;
     letter-spacing: 0.3px;
+}
+
+.message-content-wrapper {
+    display: flex;
+    align-items: flex-end;
+    gap: 0.5rem;
+    position: relative;
+    flex-direction: column;
+}
+
+.message-wrapper.other .message-content-wrapper {
+    align-items: flex-start;
+    flex-direction: row;
+}
+
+.message-wrapper.self .message-content-wrapper {
+    align-items: flex-end;
+    flex-direction: row-reverse;
 }
 
 .message-bubble {
@@ -361,6 +379,84 @@ button:active {
     font-size: 0.95rem;
     line-height: 1.4;
     word-break: break-word;
+    position: relative;
+    transition: background-color 0.3s;
+}
+
+/* 답장 관련 스타일 */
+.reply-btn {
+    opacity: 0;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid var(--glass-border);
+    border-radius: 50%;
+    width: 28px;
+    height: 28px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+    font-size: 0.8rem;
+    transition: opacity 0.2s, transform 0.2s;
+    padding: 0;
+    flex-shrink: 0;
+}
+
+.message-content-wrapper:hover .reply-btn {
+    opacity: 1;
+}
+
+.reply-btn:hover {
+    transform: scale(1.1);
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.replied-snippet {
+    background: rgba(0, 0, 0, 0.2);
+    border-left: 3px solid var(--primary);
+    padding: 0.4rem 0.6rem;
+    border-radius: 4px 8px 8px 4px;
+    font-size: 0.8rem;
+    margin-bottom: 0.3rem;
+    cursor: pointer;
+    transition: background 0.2s;
+    display: flex;
+    flex-direction: column;
+    max-width: 100%;
+}
+
+.message-wrapper.self .replied-snippet {
+    align-self: flex-end;
+    border-left: none;
+    border-right: 3px solid var(--primary);
+    border-radius: 8px 4px 4px 8px;
+}
+
+.replied-snippet:hover {
+    background: rgba(0, 0, 0, 0.4);
+}
+
+.replied-sender {
+    font-weight: bold;
+    color: var(--primary);
+    margin-bottom: 0.1rem;
+}
+
+.replied-text {
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 200px;
+}
+
+/* 하이라이트 애니메이션 */
+@keyframes highlight {
+    0% { background-color: rgba(59, 130, 246, 0.5); transform: scale(1.02); }
+    100% { background-color: inherit; transform: scale(1); }
+}
+
+.highlight-msg .message-bubble {
+    animation: highlight 1.5s ease-out;
 }
 
 .other .message-bubble {
@@ -388,6 +484,65 @@ button:active {
     padding: 1.5rem;
     background: rgba(15, 23, 42, 0.6);
     border-top: 1px solid var(--glass-border);
+    display: flex;
+    flex-direction: column;
+}
+
+.replying-to-container {
+    background: rgba(30, 41, 59, 0.9);
+    border: 1px solid var(--glass-border);
+    border-radius: 12px;
+    padding: 0.6rem 1rem;
+    margin-bottom: 0.8rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    animation: fadeIn 0.2s ease;
+}
+
+.replying-to-container.hidden {
+    display: none;
+}
+
+.reply-info {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    overflow: hidden;
+    white-space: nowrap;
+}
+
+.reply-label {
+    font-size: 0.8rem;
+    color: var(--primary);
+    font-weight: bold;
+}
+
+.reply-target-name {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-main);
+}
+
+.reply-target-text {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+.cancel-reply-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 1.2rem;
+    padding: 0 0.5rem;
+}
+
+.cancel-reply-btn:hover {
+    color: var(--danger);
+    background: transparent;
 }
 
 #chat-form {

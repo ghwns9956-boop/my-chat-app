@@ -2,8 +2,11 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
 import json
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import asyncio
+
+# 한국 표준시(KST) 설정 (UTC+9)
+KST = timezone(timedelta(hours=9))
 
 app = FastAPI()
 
@@ -42,14 +45,20 @@ class ConnectionManager:
             await self.broadcast_system_message(f"{disconnected_user}님이 채팅방을 나갔습니다.")
             await self.broadcast_user_count()
 
-    async def broadcast_message(self, message: str, sender: str):
-        time_str = datetime.now().strftime("%H:%M")
-        data = json.dumps({
+    async def broadcast_message(self, message: str, sender: str, msg_id: str = None, reply_to: dict = None):
+        time_str = datetime.now(KST).strftime("%H:%M")
+        payload = {
             "type": "chat",
             "message": message,
             "sender": sender,
             "time": time_str
-        })
+        }
+        if msg_id:
+            payload["msgId"] = msg_id
+        if reply_to:
+            payload["replyTo"] = reply_to
+            
+        data = json.dumps(payload)
         for connection in self.active_connections:
             await connection["ws"].send_text(data)
 
@@ -80,7 +89,7 @@ class ConnectionManager:
                 await connection["ws"].send_text(data)
 
     async def broadcast_image(self, base64_data: str, sender: str):
-        time_str = datetime.now().strftime("%H:%M")
+        time_str = datetime.now(KST).strftime("%H:%M")
         data = json.dumps({
             "type": "image",
             "data": base64_data,
@@ -124,8 +133,10 @@ async def websocket_endpoint(websocket: WebSocket, username: str):
                 event_type = parsed_data.get("type")
                 
                 if event_type == "chat":
+                    msg_id = parsed_data.get("msgId")
+                    reply_to = parsed_data.get("replyTo")
                     current_username = next(conn["username"] for conn in manager.active_connections if conn["ws"] == websocket)
-                    await manager.broadcast_message(parsed_data["message"], current_username)
+                    await manager.broadcast_message(parsed_data["message"], current_username, msg_id, reply_to)
                 
                 elif event_type == "typing":
                     current_username = next(conn["username"] for conn in manager.active_connections if conn["ws"] == websocket)
@@ -151,7 +162,7 @@ async def websocket_endpoint(websocket: WebSocket, username: str):
                     msg_id = parsed_data.get("msgId")
                     message = parsed_data["message"]
                     current_username = next(conn["username"] for conn in manager.active_connections if conn["ws"] == websocket)
-                    time_str = datetime.now().strftime("%H:%M")
+                    time_str = datetime.now(KST).strftime("%H:%M")
                     data = json.dumps({
                         "type": "secret_chat",
                         "message": message,
