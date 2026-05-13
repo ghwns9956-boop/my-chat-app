@@ -16,6 +16,10 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 async def root():
     return RedirectResponse(url="/static/index.html")
 
+@app.head("/")
+async def ping_head():
+    return {"status": "ok"}
+
 class ConnectionManager:
     def __init__(self):
         self.active_connections: list[dict] = []
