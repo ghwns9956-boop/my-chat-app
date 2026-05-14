@@ -40,7 +40,7 @@ class ConnectionManager:
 
     async def disconnect(self, websocket: WebSocket):
         disconnected_user = None
-        for conn in self.active_connections:
+        for conn in list(self.active_connections):
             if conn["ws"] == websocket:
                 disconnected_user = conn["username"]
                 self.active_connections.remove(conn)
@@ -63,24 +63,21 @@ class ConnectionManager:
             payload["replyTo"] = reply_to
             
         data = json.dumps(payload)
-        for connection in self.active_connections:
-            await connection["ws"].send_text(data)
+        await self._send_to_all(data)
 
     async def broadcast_system_message(self, message: str):
         data = json.dumps({
             "type": "system",
             "message": message
         })
-        for connection in self.active_connections:
-            await connection["ws"].send_text(data)
+        await self._send_to_all(data)
 
     async def broadcast_user_count(self):
         data = json.dumps({
             "type": "users_count",
             "count": len(self.active_connections)
         })
-        for connection in self.active_connections:
-            await connection["ws"].send_text(data)
+        await self._send_to_all(data)
 
     async def broadcast_typing(self, username: str, is_typing: bool):
         data = json.dumps({
@@ -88,9 +85,15 @@ class ConnectionManager:
             "username": username,
             "is_typing": is_typing
         })
-        for connection in self.active_connections:
-            if connection["username"] != username: # 자기 자신에게는 보내지 않음
-                await connection["ws"].send_text(data)
+        dead_connections = []
+        for connection in list(self.active_connections):
+            if connection["username"] != username:
+                try:
+                    await connection["ws"].send_text(data)
+                except Exception:
+                    dead_connections.append(connection)
+        for dead in dead_connections:
+            await self.disconnect(dead["ws"])
 
     async def broadcast_image(self, base64_data: str, sender: str):
         time_str = datetime.now(KST).strftime("%H:%M")
@@ -100,8 +103,7 @@ class ConnectionManager:
             "sender": sender,
             "time": time_str
         })
-        for connection in self.active_connections:
-            await connection["ws"].send_text(data)
+        await self._send_to_all(data)
 
     def update_username(self, websocket: WebSocket, new_username: str) -> str:
         old_username = ""
@@ -118,10 +120,18 @@ class ConnectionManager:
             "type": "room_name_changed",
             "new_name": new_name
         })
-        for connection in self.active_connections:
-            await connection["ws"].send_text(data)
-        
+        await self._send_to_all(data)
         await self.broadcast_system_message(f"{updater_username}님이 채팅방 이름을 [{new_name}](으)로 변경했습니다.")
+
+    async def _send_to_all(self, data: str):
+        dead_connections = []
+        for connection in list(self.active_connections):
+            try:
+                await connection["ws"].send_text(data)
+            except Exception:
+                dead_connections.append(connection)
+        for dead in dead_connections:
+            await self.disconnect(dead["ws"])
 
 manager = ConnectionManager()
 
@@ -175,7 +185,10 @@ async def websocket_endpoint(websocket: WebSocket, username: str):
                         "msgId": msg_id
                     })
                     for connection in manager.active_connections:
-                        await connection["ws"].send_text(data)
+                        try:
+                            await connection["ws"].send_text(data)
+                        except Exception:
+                            pass
                         
                 elif event_type == "effect":
                     # 흔들기, 폭죽 등 클라이언트 특수 효과 브로드캐스트
@@ -187,7 +200,10 @@ async def websocket_endpoint(websocket: WebSocket, username: str):
                         "sender": current_username
                     })
                     for connection in manager.active_connections:
-                        await connection["ws"].send_text(data)
+                        try:
+                            await connection["ws"].send_text(data)
+                        except Exception:
+                            pass
 
                 elif event_type == "reaction":
                     msg_id = parsed_data.get("msgId")
@@ -199,11 +215,17 @@ async def websocket_endpoint(websocket: WebSocket, username: str):
                             "emoji": emoji
                         })
                         for connection in manager.active_connections:
-                            await connection["ws"].send_text(data)
+                            try:
+                                await connection["ws"].send_text(data)
+                            except Exception:
+                                pass
             except json.JSONDecodeError:
                 # 구버전 호환용 (그냥 일반 텍스트가 왔을 때)
                 current_username = next((conn["username"] for conn in manager.active_connections if conn["ws"] == websocket), username)
                 await manager.broadcast_message(raw_data, current_username)
                 
     except WebSocketDisconnect:
+        await manager.disconnect(websocket)
+    except Exception as e:
+        print(f"WebSocket Client Error: {e}")
         await manager.disconnect(websocket)
