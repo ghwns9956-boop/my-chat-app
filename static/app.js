@@ -1,18 +1,27 @@
 const loginScreen = document.getElementById('login-screen');
 const chatScreen = document.getElementById('chat-screen');
-const loginForm = document.getElementById('login-form');
 const usernameInput = document.getElementById('username-input');
+const randomNameBtn = document.getElementById('random-name-btn');
+
+// 로비 탭 및 폼
+const tabJoin = document.getElementById('tab-join');
+const tabCreate = document.getElementById('tab-create');
+const joinForm = document.getElementById('join-form');
+const createForm = document.getElementById('create-form');
+const inviteCodeInput = document.getElementById('invite-code-input');
+const managerCodeInput = document.getElementById('manager-code-input');
+const newRoomNameInput = document.getElementById('new-room-name-input');
+
+// 채팅 화면 요소
 const chatForm = document.getElementById('chat-form');
 const messageInput = document.getElementById('message-input');
 const chatMessages = document.getElementById('chat-messages');
 const logoutBtn = document.getElementById('logout-btn');
-const randomNameBtn = document.getElementById('random-name-btn');
 const renameBtn = document.getElementById('rename-btn');
 const userCountDisplay = document.getElementById('user-count-display');
 const typingIndicator = document.getElementById('typing-indicator');
 const typingText = document.getElementById('typing-text');
 const roomNameDisplay = document.getElementById('room-name-display');
-const editRoomNameBtn = document.getElementById('edit-room-name-btn');
 const attachBtn = document.getElementById('attach-btn');
 const imageUploadInput = document.getElementById('image-upload-input');
 const dragOverlay = document.getElementById('drag-overlay');
@@ -29,14 +38,35 @@ const replyingToName = document.getElementById('replying-to-name');
 const replyingToText = document.getElementById('replying-to-text');
 const cancelReplyBtn = document.getElementById('cancel-reply-btn');
 
+// 방 관리 모달 엘리먼트
+const manageRoomBtn = document.getElementById('manage-room-btn');
+const roomManageModal = document.getElementById('room-manage-modal');
+const closeManageBtn = document.getElementById('close-manage-btn');
+const manageInviteCode = document.getElementById('manage-invite-code');
+const copyCodeBtn = document.getElementById('copy-code-btn');
+const manageRoomNameInput = document.getElementById('manage-room-name-input');
+const manageRenameBtn = document.getElementById('manage-rename-btn');
+
+// 사이드바 엘리먼트
+const roomSidebar = document.getElementById('room-sidebar');
+const toggleSidebarBtn = document.getElementById('toggle-sidebar-btn');
+const closeSidebarBtn = document.getElementById('close-sidebar-btn');
+const roomListContainer = document.getElementById('room-list-container');
+const sidebarAddRoomBtn = document.getElementById('sidebar-add-room-btn');
+
 let ws = null;
 let currentUsername = localStorage.getItem('chat_username') || '';
 let typingTimeout = null;
 let activeTypers = new Set();
-let currentRoomName = "글로벌 채팅방";
+let currentRoomName = "채팅방";
+let currentRoomCode = localStorage.getItem('chat_last_room') || '';
+let isCreator = false;
 let isSecretMode = false;
-let localHistory = JSON.parse(localStorage.getItem('chat_history')) || [];
+let localHistory = [];
 let replyingTo = null;
+
+// 사이드바 방 리스트 배열
+let savedRooms = JSON.parse(localStorage.getItem('chat_saved_rooms')) || [];
 
 // 오디오 컨텍스트 (알림음용)
 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -59,11 +89,128 @@ function playBeep() {
     oscillator.stop(audioCtx.currentTime + 0.1);
 }
 
-// 화면 진입 시 자동 로그인 처리
-window.addEventListener('DOMContentLoaded', () => {
+// 다중 방 저장 및 렌더링 로직
+function addSavedRoom(code, name) {
+    savedRooms = savedRooms.filter(r => r.code !== code); 
+    savedRooms.unshift({code, name}); 
+    localStorage.setItem('chat_saved_rooms', JSON.stringify(savedRooms));
+    renderSidebarRooms();
+}
+
+window.removeSavedRoom = function(code) {
+    savedRooms = savedRooms.filter(r => r.code !== code);
+    localStorage.setItem('chat_saved_rooms', JSON.stringify(savedRooms));
+    renderSidebarRooms();
+    
+    // 만약 현재 지운 방이 접속중인 방이라면 로비로 튕기기
+    if(code === currentRoomCode) {
+        logout();
+    }
+}
+
+function renderSidebarRooms() {
+    roomListContainer.innerHTML = '';
+    
+    savedRooms.forEach(room => {
+        const item = document.createElement('div');
+        item.className = `room-item ${room.code === currentRoomCode ? 'active' : ''}`;
+        item.innerHTML = `
+            <div class="room-item-info" onclick="switchRoom('${room.code}')">
+                <span class="room-item-name">${escapeHTML(room.name)}</span>
+                <span class="room-item-code">${escapeHTML(room.code)}</span>
+            </div>
+            <button class="remove-room-btn" onclick="removeSavedRoom('${room.code}')" title="방 지우기">✕</button>
+        `;
+        roomListContainer.appendChild(item);
+    });
+}
+
+// 사이드바 토글 이벤트
+if(toggleSidebarBtn) {
+    toggleSidebarBtn.addEventListener('click', () => {
+        roomSidebar.classList.add('open');
+    });
+}
+if(closeSidebarBtn) {
+    closeSidebarBtn.addEventListener('click', () => {
+        roomSidebar.classList.remove('open');
+    });
+}
+
+// 사이드바에서 [+ 새 방 추가] 클릭 시
+if(sidebarAddRoomBtn) {
+    sidebarAddRoomBtn.addEventListener('click', () => {
+        roomSidebar.classList.remove('open');
+        logout(); // 기존 방에서 나가고 로비로 이동
+    });
+}
+
+// 방 스위치 로직
+window.switchRoom = async function(newCode) {
+    if (newCode === currentRoomCode) return;
+    
+    try {
+        const res = await fetch(`/api/rooms/${newCode}`);
+        if (res.ok) {
+            const data = await res.json();
+            if (data.exists) {
+                if (ws) {
+                    ws.onclose = null; // 의도적 연결 끊김이므로 onclose 핸들러 무시
+                    ws.close();
+                }
+                
+                currentRoomCode = newCode;
+                currentRoomName = data.name;
+                isCreator = (data.creator === currentUsername);
+                
+                roomSidebar.classList.remove('open');
+                
+                localStorage.setItem('chat_last_room', currentRoomCode);
+                connectWebSocket(newCode, currentUsername);
+            } else {
+                alert("해당 채팅방이 더 이상 존재하지 않거나 폭파되었습니다.");
+                removeSavedRoom(newCode);
+            }
+        }
+    } catch (e) {
+        alert("서버 연결에 실패했습니다.");
+    }
+}
+
+
+// 화면 진입 시 초기화
+window.addEventListener('DOMContentLoaded', async () => {
     if (currentUsername) {
         usernameInput.value = currentUsername;
-        connectWebSocket(currentUsername);
+    }
+    
+    // 만약 `chat_last_room`이 없다면 `savedRooms` 배열의 첫 번째 방으로 시도
+    if (!currentRoomCode && savedRooms.length > 0) {
+        currentRoomCode = savedRooms[0].code;
+    }
+    
+    // 이전에 접속했던 방 코드가 있다면 자동 접속 시도
+    if (currentUsername && currentRoomCode) {
+        inviteCodeInput.value = currentRoomCode;
+        try {
+            const res = await fetch(`/api/rooms/${currentRoomCode}`);
+            if (res.ok) {
+                const data = await res.json();
+                if (data.exists) {
+                    currentRoomName = data.name;
+                    isCreator = (data.creator === currentUsername);
+                    connectWebSocket(currentRoomCode, currentUsername);
+                } else {
+                    // 서버가 재부팅되어 방이 사라진 경우 리스트에서 삭제
+                    localStorage.removeItem('chat_last_room');
+                    removeSavedRoom(currentRoomCode);
+                    currentRoomCode = "";
+                    inviteCodeInput.value = "";
+                }
+            }
+        } catch (err) {
+            console.error("자동 접속 실패", err);
+        }
     }
 });
 
@@ -73,7 +220,6 @@ const favicon = document.getElementById('favicon');
 const pageTitle = document.getElementById('page-title');
 const originalFavicon = favicon.href;
 
-// 화면 포커스 상태 감지하여 알림 초기화
 document.addEventListener("visibilitychange", () => {
     if (!document.hidden) {
         unreadCount = 0;
@@ -82,7 +228,6 @@ document.addEventListener("visibilitychange", () => {
     }
 });
 
-// 보스 키 (Boss Key) 동작
 document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
         if (chatScreen.classList.contains('active')) {
@@ -91,31 +236,26 @@ document.addEventListener("keydown", (e) => {
     }
 });
 
-// 파비콘에 붉은 알림 뱃지 그리기
 function updateNotificationBadge() {
     if (document.hidden) {
         unreadCount++;
         pageTitle.textContent = `(${unreadCount}) ${currentRoomName}`;
         
-        // 캔버스를 생성하여 기존 파비콘 위에 붉은 원과 숫자 그리기
         const canvas = document.createElement('canvas');
         canvas.width = 32;
         canvas.height = 32;
         const ctx = canvas.getContext('2d');
         
-        // 말풍선 이모지 그리기
         ctx.font = '24px Arial';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText('💬', 16, 16);
         
-        // 붉은 뱃지 그리기
         ctx.beginPath();
         ctx.arc(24, 8, 8, 0, 2 * Math.PI);
-        ctx.fillStyle = '#ef4444'; // 붉은색
+        ctx.fillStyle = '#ef4444';
         ctx.fill();
         
-        // 숫자 그리기
         ctx.fillStyle = '#ffffff';
         ctx.font = 'bold 10px Inter, Arial';
         const displayNum = unreadCount > 9 ? '9+' : unreadCount;
@@ -125,7 +265,6 @@ function updateNotificationBadge() {
     }
 }
 
-// 랜덤 닉네임 생성기
 const adjectives = ["행복한", "슬픈", "게으른", "용감한", "수줍은", "배고픈", "심심한", "졸린", "똑똑한", "빠른"];
 const nouns = ["다람쥐", "호랑이", "거북이", "고양이", "강아지", "코끼리", "독수리", "펭귄", "팬더", "토끼"];
 
@@ -135,16 +274,105 @@ randomNameBtn.addEventListener('click', () => {
     usernameInput.value = `${adj} ${noun}`;
 });
 
-// 로그인 (채팅방 입장)
-loginForm.addEventListener('submit', (e) => {
+// 로비 탭 전환 로직
+tabJoin.addEventListener('click', () => {
+    tabJoin.classList.add('active');
+    tabJoin.style.background = 'rgba(255,255,255,0.1)';
+    tabJoin.style.color = 'var(--text-main)';
+    tabJoin.style.borderColor = 'var(--border)';
+    
+    tabCreate.classList.remove('active');
+    tabCreate.style.background = 'transparent';
+    tabCreate.style.color = 'var(--text-muted)';
+    tabCreate.style.borderColor = 'transparent';
+    
+    joinForm.classList.remove('hidden');
+    createForm.classList.add('hidden');
+});
+
+tabCreate.addEventListener('click', () => {
+    tabCreate.classList.add('active');
+    tabCreate.style.background = 'rgba(255,255,255,0.1)';
+    tabCreate.style.color = 'var(--text-main)';
+    tabCreate.style.borderColor = 'var(--border)';
+    
+    tabJoin.classList.remove('active');
+    tabJoin.style.background = 'transparent';
+    tabJoin.style.color = 'var(--text-muted)';
+    tabJoin.style.borderColor = 'transparent';
+    
+    createForm.classList.remove('hidden');
+    joinForm.classList.add('hidden');
+});
+
+// 방 참가 폼 제출
+joinForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const username = usernameInput.value.trim();
-    if (username) {
-        currentUsername = username;
-        localStorage.setItem('chat_username', username);
-        connectWebSocket(username);
+    const inviteCode = inviteCodeInput.value.trim().toUpperCase();
+    
+    if (!username || !inviteCode) return;
+    
+    try {
+        const res = await fetch(`/api/rooms/${inviteCode}`);
+        const data = await res.json();
+        
+        if (data.exists) {
+            currentUsername = username;
+            currentRoomCode = inviteCode;
+            currentRoomName = data.name;
+            isCreator = (data.creator === username);
+            
+            localStorage.setItem('chat_username', username);
+            localStorage.setItem('chat_last_room', currentRoomCode);
+            connectWebSocket(inviteCode, username);
+        } else {
+            alert('존재하지 않는 초대 코드입니다.');
+        }
+    } catch (err) {
+        alert('서버 연결에 실패했습니다.');
     }
 });
+
+// 방 생성 폼 제출
+createForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const username = usernameInput.value.trim();
+    const managerCode = managerCodeInput.value.trim();
+    const roomName = newRoomNameInput.value.trim();
+    
+    if (!username || !managerCode || !roomName) return;
+    
+    try {
+        const res = await fetch('/api/rooms', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                manager_code: managerCode,
+                room_name: roomName,
+                creator: username
+            })
+        });
+        
+        if (res.ok) {
+            const data = await res.json();
+            currentUsername = username;
+            currentRoomCode = data.invite_code;
+            currentRoomName = roomName;
+            isCreator = true;
+            
+            localStorage.setItem('chat_username', username);
+            localStorage.setItem('chat_last_room', currentRoomCode);
+            connectWebSocket(currentRoomCode, username);
+        } else {
+            const errData = await res.json();
+            alert(errData.error || '방 생성에 실패했습니다.');
+        }
+    } catch (err) {
+        alert('서버 연결에 실패했습니다.');
+    }
+});
+
 
 // 닉네임 변경
 renameBtn.addEventListener('click', () => {
@@ -158,19 +386,43 @@ renameBtn.addEventListener('click', () => {
     }
 });
 
-// 채팅방 이름 변경
-editRoomNameBtn.addEventListener('click', () => {
-    const newRoomName = prompt("새로운 채팅방 이름을 입력하세요:", roomNameDisplay.textContent);
-    if (newRoomName && newRoomName.trim() !== "") {
+// 방 관리 버튼 노출 및 모달 제어
+manageRoomBtn.addEventListener('click', () => {
+    manageInviteCode.textContent = currentRoomCode;
+    manageRoomNameInput.value = currentRoomName;
+    roomManageModal.classList.remove('hidden');
+});
+
+closeManageBtn.addEventListener('click', () => {
+    roomManageModal.classList.add('hidden');
+});
+
+copyCodeBtn.addEventListener('click', () => {
+    navigator.clipboard.writeText(currentRoomCode).then(() => {
+        const originalText = copyCodeBtn.innerHTML;
+        copyCodeBtn.innerHTML = '<span>✅</span> 복사 완료!';
+        copyCodeBtn.style.background = 'var(--success)';
+        setTimeout(() => {
+            copyCodeBtn.innerHTML = originalText;
+            copyCodeBtn.style.background = 'var(--secondary)';
+        }, 2000);
+    }).catch(err => {
+        alert('초대 코드 복사에 실패했습니다.');
+    });
+});
+
+manageRenameBtn.addEventListener('click', () => {
+    const newName = manageRoomNameInput.value.trim();
+    if (newName && newName !== currentRoomName) {
         if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: "rename_room", new_name: newRoomName.trim() }));
+            ws.send(JSON.stringify({ type: "rename_room", new_name: newName }));
         }
+        roomManageModal.classList.add('hidden');
     }
 });
 
 // 웹소켓 연결
-function connectWebSocket(username) {
-    // 알림 권한 요청 (브라우저 푸시 알림)
+function connectWebSocket(roomCode, username) {
     if ("Notification" in window) {
         if (Notification.permission !== "granted" && Notification.permission !== "denied") {
             Notification.requestPermission();
@@ -179,14 +431,28 @@ function connectWebSocket(username) {
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host;
-    ws = new WebSocket(`${protocol}//${host}/ws/${encodeURIComponent(username)}`);
+    ws = new WebSocket(`${protocol}//${host}/ws/${roomCode}/${encodeURIComponent(username)}`);
 
     ws.onopen = () => {
         loginScreen.classList.remove('active');
         chatScreen.classList.add('active');
         messageInput.focus();
         
-        // 로컬 채팅 기록 복원
+        // 현재 방 이름을 사이드바 리스트에 추가 (또는 상단 갱신)
+        addSavedRoom(roomCode, currentRoomName);
+        
+        // 방장 여부에 따른 UI 업데이트
+        if (isCreator) {
+            manageRoomBtn.classList.remove('hidden');
+        } else {
+            manageRoomBtn.classList.add('hidden');
+        }
+        
+        roomNameDisplay.textContent = currentRoomName;
+        
+        // 로컬 채팅 기록 복원 (방 별로 격리)
+        localHistory = JSON.parse(localStorage.getItem(`chat_history_${roomCode}`)) || [];
+        
         chatMessages.innerHTML = '';
         const systemMsg = document.createElement('div');
         systemMsg.className = 'system-message';
@@ -212,6 +478,10 @@ function connectWebSocket(username) {
         } else if (data.type === 'room_name_changed') {
             currentRoomName = data.new_name;
             roomNameDisplay.textContent = currentRoomName;
+            
+            // 사이드바 이름도 즉시 갱신
+            addSavedRoom(roomCode, currentRoomName);
+            
             if (!document.hidden) {
                 pageTitle.textContent = currentRoomName;
             }
@@ -225,10 +495,8 @@ function connectWebSocket(username) {
             handleEffect(data.effect, data.sender);
         }
         
-        // 데스크톱 알림 및 소리 재생
         if (data.type === 'chat' || data.type === 'image' || data.type === 'secret_chat' || data.type === 'effect') {
             if (data.sender !== currentUsername) {
-                // 비활성 탭일 때만 소리 재생
                 if (document.hidden) playBeep();
                 
                 if (document.hidden && "Notification" in window && Notification.permission === "granted") {
@@ -247,8 +515,11 @@ function connectWebSocket(username) {
     };
 
     ws.onclose = () => {
-        alert("서버와의 연결이 끊어졌습니다.");
-        logout();
+        // 이미 다른 방으로 switch 중일 땐 경고하지 않음
+        if(currentRoomCode === roomCode) {
+            alert("서버와의 연결이 끊어졌습니다.");
+            logout();
+        }
     };
 
     ws.onerror = (error) => {
@@ -312,12 +583,9 @@ chatForm.addEventListener('submit', (e) => {
     e.preventDefault();
     const message = messageInput.value.trim();
     if (message && ws && ws.readyState === WebSocket.OPEN) {
-        
-        // 슬래시 명령어 (미니게임) 파싱
         if (message.startsWith('/')) {
             handleSlashCommand(message);
         } else {
-            // 일반 메시지 또는 시크릿 메시지 전송
             const msgId = 'msg-' + Math.random().toString(36).substr(2, 9);
             const msgType = isSecretMode ? "secret_chat" : "chat";
             ws.send(JSON.stringify({ 
@@ -327,12 +595,10 @@ chatForm.addEventListener('submit', (e) => {
                 replyTo: replyingTo
             }));
             
-            // 답장 상태 초기화
             cancelReply();
         }
         messageInput.value = '';
         
-        // 타이핑 상태 초기화
         ws.send(JSON.stringify({ type: "typing", is_typing: false }));
         if (typingTimeout) {
             clearTimeout(typingTimeout);
@@ -341,7 +607,6 @@ chatForm.addEventListener('submit', (e) => {
     }
 });
 
-// 답장 취소
 cancelReplyBtn.addEventListener('click', cancelReply);
 
 function cancelReply() {
@@ -367,7 +632,6 @@ window.scrollToMessage = function(msgId) {
     }
 };
 
-// 슬래시 명령어 로직
 function handleSlashCommand(message) {
     const parts = message.split(' ');
     const cmd = parts[0];
@@ -386,16 +650,11 @@ function handleSlashCommand(message) {
         }
     } else if (cmd === '/점메추') {
         const menus = [
-            // 한식
             "제육볶음", "김치찌개", "된장찌개", "부대찌개", "국밥", "비빔밥", 
             "뼈해장국", "설렁탕", "돈까스", "떡볶이", "김밥", "보쌈", "냉면",
-            // 일식
             "초밥", "라멘", "돈카츠", "우동", "규동(소고기덮밥)", "가츠동", "텐동", "소바",
-            // 중식
             "짜장면", "짬뽕", "볶음밥", "마라탕", "마라샹궈", "탕수육", "딤섬",
-            // 양식
             "파스타", "피자", "햄버거", "샐러드", "샌드위치", "스테이크", "리조또",
-            // 아시안 (태국/베트남/기타)
             "팟타이", "쌀국수", "똠얌꿍", "푸팟퐁커리", "나시고랭", "분짜", "반미", "카레"
         ];
         const picked = menus[Math.floor(Math.random() * menus.length)];
@@ -458,34 +717,37 @@ function handleSlashCommand(message) {
         resultMsg = `[시스템] 알 수 없는 명령어입니다. (가능: /주사위, /사다리, /점메추, /동전, /가위바위보, /로또, /운세, /러시안룰렛, /흔들기, /폭죽)`;
     }
     
-    // 미니게임 결과를 내 채팅으로 전송
     const msgId = 'msg-' + Math.random().toString(36).substr(2, 9);
     ws.send(JSON.stringify({ type: "chat", message: resultMsg, msgId: msgId }));
 }
 
-// 로그아웃 (나가기)
+// 로그아웃 (로비로 가기)
 logoutBtn.addEventListener('click', logout);
 
 function logout() {
     if (ws) {
+        ws.onclose = null;
         ws.close();
     }
     chatScreen.classList.remove('active');
     loginScreen.classList.add('active');
-    localStorage.removeItem('chat_username'); // 명시적 나가기 시 닉네임 지우기
-    currentUsername = '';
+    roomSidebar.classList.remove('open');
+    
+    localStorage.removeItem('chat_last_room');
+    currentRoomCode = "";
 }
 
 // 로컬 기록 지우기 (휴지통 버튼)
 clearChatBtn.addEventListener('click', () => {
     if (confirm("내 화면의 모든 대화 기록을 지우시겠습니까?\n(상대방의 화면에서는 지워지지 않습니다.)")) {
         localHistory = [];
-        localStorage.removeItem('chat_history');
+        if(currentRoomCode) {
+            localStorage.removeItem(`chat_history_${currentRoomCode}`);
+        }
         chatMessages.innerHTML = '<div class="system-message">대화 기록이 모두 삭제되었습니다.</div>';
     }
 });
 
-// UI 업데이트 함수들
 function appendSystemMessage(msg) {
     const div = document.createElement('div');
     div.className = 'system-message';
@@ -494,7 +756,6 @@ function appendSystemMessage(msg) {
     scrollToBottom();
 }
 
-// 닉네임을 기반으로 고유한 HSL 색상 생성 (파스텔톤 계열로 가독성 높임)
 function getStringColor(str) {
     if (!str) return 'hsl(0, 0%, 50%)';
     let hash = 0;
@@ -502,10 +763,9 @@ function getStringColor(str) {
         hash = str.charCodeAt(i) + ((hash << 5) - hash);
     }
     const h = Math.abs(hash) % 360;
-    return `hsl(${h}, 70%, 75%)`; // 밝고 채도 있는 색상
+    return `hsl(${h}, 70%, 75%)`; 
 }
 
-// 메시지 렌더링 통합 (기록 저장용 파라미터 추가)
 function appendChatMessage(data) {
     renderMessage(data, true);
 }
@@ -515,11 +775,12 @@ function renderMessage(data, saveToLocal) {
     const wrapper = document.createElement('div');
     wrapper.className = `message-wrapper ${isSelf ? 'self' : 'other'}`;
     
-    // 로컬 스토리지 저장 (일반 채팅만 저장, 시크릿이나 이미지는 휘발성 유지)
     if (saveToLocal && data.type === 'chat') {
         localHistory.push(data);
-        if (localHistory.length > 200) localHistory.shift(); // 200개 제한
-        localStorage.setItem('chat_history', JSON.stringify(localHistory));
+        if (localHistory.length > 200) localHistory.shift(); 
+        if(currentRoomCode) {
+            localStorage.setItem(`chat_history_${currentRoomCode}`, JSON.stringify(localHistory));
+        }
     }
 
     let infoHtml = '';
@@ -546,7 +807,6 @@ function renderMessage(data, saveToLocal) {
     const msgIdAttr = data.msgId ? `id="${data.msgId}"` : '';
     const safeMsg = escapeHTML(data.message || '');
     
-    // 답장할 메시지가 있는 경우 (원본 표시 블록 생성)
     let replySnippetHtml = '';
     if (data.replyTo) {
         replySnippetHtml = `
@@ -557,17 +817,14 @@ function renderMessage(data, saveToLocal) {
         `;
     }
     
-    // 답장 버튼 UI (호버 시 나타남)
     let replyBtnHtml = '';
     if (data.type === 'chat' && data.msgId) {
-        // 이스케이프 처리된 인자를 전달하여 문법 오류 방지
         const encodedMsg = encodeURIComponent(data.message);
         const encodedSender = encodeURIComponent(data.sender);
         replyBtnHtml = `<button class="reply-btn" title="답장하기" onclick="initReply('${data.msgId}', decodeURIComponent('${encodedSender}'), decodeURIComponent('${encodedMsg}'))">↩️</button>`;
     }
     
     if (data.type === 'image') {
-        // 임시 폭파 사진(Snapchat style) UI 생성
         const imgId = 'img-' + Math.random().toString(36).substr(2, 9);
         contentHtml = `
             ${replySnippetHtml}
@@ -611,7 +868,6 @@ function renderMessage(data, saveToLocal) {
 
     chatMessages.appendChild(wrapper);
     
-    // 리액션(더블클릭) 이벤트 등록 (일반 메시지인 경우)
     if (data.type === 'chat' && data.msgId) {
         const bubble = wrapper.querySelector('.message-bubble');
         if (bubble) {
@@ -626,7 +882,6 @@ function renderMessage(data, saveToLocal) {
     scrollToBottom();
 }
 
-// 리액션 렌더링 로직
 function handleReaction(msgId, emoji) {
     if (!msgId) return;
     const bubble = document.getElementById(msgId);
@@ -638,7 +893,6 @@ function handleReaction(msgId, emoji) {
             bubble.appendChild(badge);
         }
         
-        // 기존 이모지가 있으면 카운트 증가 또는 추가
         const currentText = badge.textContent;
         if (currentText.includes(emoji)) {
             const countMatch = currentText.match(/\d+/);
@@ -650,7 +904,6 @@ function handleReaction(msgId, emoji) {
     }
 }
 
-// 특수 효과 처리
 function handleEffect(effect, sender) {
     if (effect === 'shake') {
         document.body.classList.add('shake-animation');
@@ -663,7 +916,6 @@ function handleEffect(effect, sender) {
     }
 }
 
-// 폭죽 파티클 애니메이션
 function createConfetti() {
     const colors = ['#f87171', '#fbbf24', '#34d399', '#60a5fa', '#a78bfa', '#f472b6'];
     for (let i = 0; i < 50; i++) {
@@ -679,20 +931,17 @@ function createConfetti() {
     }
 }
 
-// 1회성 이미지 보기 로직
 window.viewEphemeralImage = function(imgId, base64Data) {
     const btn = document.getElementById(`btn-${imgId}`);
     const container = document.getElementById(`container-${imgId}`);
     const imgView = document.getElementById(`view-${imgId}`);
     const timerDisplay = document.getElementById(`timer-${imgId}`);
     
-    // 버튼 숨기고 이미지 표시
     btn.style.display = 'none';
     container.style.display = 'inline-block';
     imgView.src = base64Data;
     scrollToBottom();
     
-    // 20초 카운트다운
     let timeLeft = 20;
     const interval = setInterval(() => {
         timeLeft--;
@@ -700,13 +949,11 @@ window.viewEphemeralImage = function(imgId, base64Data) {
         
         if (timeLeft <= 0) {
             clearInterval(interval);
-            // 사진 파기
             container.innerHTML = '<div class="message-bubble" style="font-style: italic; color: var(--text-muted);">💥 사진이 폭파되었습니다.</div>';
         }
     }, 1000);
 };
 
-// 1회성 시크릿 텍스트 보기 로직
 window.viewSecretText = function(secretId, decodedMsg) {
     const btn = document.getElementById(`btn-${secretId}`);
     const container = document.getElementById(`container-${secretId}`);
@@ -715,7 +962,6 @@ window.viewSecretText = function(secretId, decodedMsg) {
     
     btn.style.display = 'none';
     container.style.display = 'inline-block';
-    // escapeHTML된 문자열이 넘어오므로 innerHTML을 사용 (XSS 방어됨)
     textView.innerHTML = decodedMsg; 
     scrollToBottom();
     
@@ -726,13 +972,11 @@ window.viewSecretText = function(secretId, decodedMsg) {
         
         if (timeLeft <= 0) {
             clearInterval(interval);
-            // 텍스트 파기
             container.outerHTML = '<div class="message-bubble" style="font-style: italic; color: var(--text-muted);">💥 메시지가 폭파되었습니다.</div>';
         }
     }, 1000);
 };
 
-// 이미지 확대 모달 제어
 window.openZoomModal = function(base64Data) {
     zoomedImage.src = base64Data;
     imageZoomModal.classList.remove('hidden');
@@ -750,14 +994,10 @@ imageZoomModal.addEventListener('click', (e) => {
     }
 });
 
-// --- 드래그 앤 드롭 및 이미지 전송 로직 ---
-
-// 클립보드 복붙(Ctrl+V) 이벤트 처리
 document.addEventListener('paste', (e) => {
     if (e.clipboardData && e.clipboardData.files && e.clipboardData.files.length > 0) {
         const file = e.clipboardData.files[0];
         if (file.type.startsWith('image/')) {
-            // 메시지 입력창에 포커스가 있으면 텍스트 입력 방지(이미지가 전송되므로)
             e.preventDefault(); 
             handleImageFile(file);
         }
@@ -771,10 +1011,9 @@ attachBtn.addEventListener('click', () => {
 imageUploadInput.addEventListener('change', (e) => {
     const file = e.target.files[0];
     if (file) handleImageFile(file);
-    e.target.value = ''; // 동일 파일 재선택 가능하게 리셋
+    e.target.value = ''; 
 });
 
-// 드래그 이벤트 처리
 chatScreen.addEventListener('dragover', (e) => {
     e.preventDefault();
     dragOverlay.classList.remove('hidden');
@@ -802,7 +1041,6 @@ chatScreen.addEventListener('drop', (e) => {
 });
 
 function handleImageFile(file) {
-    // 캔버스를 이용해 이미지 압축 (최대 폭 800px)
     const reader = new FileReader();
     reader.onload = (e) => {
         const img = new Image();
@@ -823,7 +1061,6 @@ function handleImageFile(file) {
             const ctx = canvas.getContext('2d');
             ctx.drawImage(img, 0, 0, width, height);
             
-            // jpeg 품질 0.7로 압축하여 base64 추출
             const base64String = canvas.toDataURL('image/jpeg', 0.7);
             
             if (ws && ws.readyState === WebSocket.OPEN) {

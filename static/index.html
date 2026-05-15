@@ -14,35 +14,54 @@
         <div id="login-screen" class="screen active">
             <div class="glass-card">
                 <h2>환영합니다 👋</h2>
-                <p>채팅방에 입장하려면 닉네임을 입력하세요.</p>
-                <form id="login-form">
-                    <div style="display: flex; gap: 0.5rem; margin-bottom: 1rem;">
-                        <input type="text" id="username-input" placeholder="닉네임 입력..." required autocomplete="off">
-                        <button type="button" id="random-name-btn" title="랜덤 닉네임" style="width: auto; padding: 0 1rem; flex-shrink: 0;">🎲</button>
-                    </div>
-                    <button type="submit">입장하기</button>
+                <p style="margin-bottom: 1rem; color: var(--text-muted);">채팅방에 입장하려면 닉네임을 입력하세요.</p>
+                
+                <div style="display: flex; gap: 0.5rem; margin-bottom: 1.5rem;">
+                    <input type="text" id="username-input" placeholder="닉네임 입력..." required autocomplete="off">
+                    <button type="button" id="random-name-btn" title="랜덤 닉네임" style="width: auto; padding: 0 1rem; flex-shrink: 0;">🎲</button>
+                </div>
+
+                <div class="lobby-tabs" style="display: flex; gap: 0.5rem; margin-bottom: 1rem;">
+                    <button type="button" id="tab-join" class="lobby-tab active" style="flex: 1; border-radius: var(--radius); padding: 0.5rem; background: rgba(255,255,255,0.1); border: 1px solid var(--border);">방 참가</button>
+                    <button type="button" id="tab-create" class="lobby-tab" style="flex: 1; border-radius: var(--radius); padding: 0.5rem; background: transparent; border: 1px solid transparent; color: var(--text-muted);">방 만들기</button>
+                </div>
+
+                <!-- 방 참가 폼 -->
+                <form id="join-form">
+                    <input type="text" id="invite-code-input" placeholder="초대 코드 (예: A1B2)" style="margin-bottom: 1rem;" autocomplete="off" required>
+                    <button type="submit">채팅방 입장하기</button>
+                </form>
+
+                <!-- 방 생성 폼 -->
+                <form id="create-form" class="hidden">
+                    <input type="password" id="manager-code-input" placeholder="관리자 비밀번호 (방 생성 권한)" style="margin-bottom: 1rem;" autocomplete="off" required>
+                    <input type="text" id="new-room-name-input" placeholder="생성할 채팅방 이름" style="margin-bottom: 1rem;" autocomplete="off" required>
+                    <button type="submit">새 방 만들기</button>
                 </form>
             </div>
         </div>
 
-        <!-- 채팅 화면 -->
-        <div id="chat-screen" class="screen">
-            <div id="drag-overlay" class="drag-overlay hidden">
-                <div class="drag-message">📸 여기에 사진을 놓아 전송하세요!</div>
-            </div>
+        <!-- 채팅 화면 (사이드바 포함) -->
+        <div id="chat-screen" class="screen chat-layout">
+            <!-- 메인 채팅 영역 -->
+            <div class="chat-main-area">
+                <div id="drag-overlay" class="drag-overlay hidden">
+                    <div class="drag-message">📸 여기에 사진을 놓아 전송하세요!</div>
+                </div>
             
             <header class="chat-header">
                 <div class="header-info">
                     <h2 id="room-name-display">글로벌 채팅방</h2>
-                    <button type="button" id="edit-room-name-btn" class="icon-btn" title="방 이름 변경">✏️</button>
                     <span id="user-count-display" class="user-count">온라인: 1명</span>
                 </div>
                 <div class="header-actions">
+                    <button type="button" id="manage-room-btn" class="icon-btn hidden" title="방 관리">👑</button>
                     <button type="button" id="clear-chat-btn" class="icon-btn danger-btn" title="내 화면의 모든 대화 기록 싹 지우기">🗑️</button>
                     <button type="button" id="rename-btn" class="icon-btn" title="내 닉네임 변경">👤</button>
-                    <button type="button" id="logout-btn" class="logout-btn" title="나가기">
+                    <button type="button" id="logout-btn" class="logout-btn" title="로비로 가기">
                         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
                     </button>
+                    <button type="button" id="toggle-sidebar-btn" class="mobile-sidebar-toggle" style="background: rgba(255,255,255,0.2); border: none; color: white; padding: 0.4rem 0.8rem; border-radius: 6px; cursor: pointer; font-size: 0.9rem; margin-left: 0.3rem;">채팅방 리스트</button>
                 </div>
             </header>
             
@@ -80,6 +99,21 @@
                     </button>
                 </form>
             </div>
+            </div> <!-- 메인 채팅 영역 종료 -->
+            
+            <!-- 우측 사이드바 -->
+            <aside id="room-sidebar" class="room-sidebar">
+                <div class="sidebar-header">
+                    <h3 style="font-size: 1rem;">내 채팅방 리스트</h3>
+                    <button id="close-sidebar-btn" class="icon-btn close-sidebar-btn">✕</button>
+                </div>
+                <div id="room-list-container" class="room-list-container">
+                    <!-- 방 리스트 동적 렌더링 -->
+                </div>
+                <div class="sidebar-footer">
+                    <button id="sidebar-add-room-btn" style="width: 100%; background: var(--secondary); padding: 0.6rem; border-radius: var(--radius);">+ 새 방 추가/참여</button>
+                </div>
+            </aside>
         </div>
     </div>
 
@@ -87,6 +121,30 @@
     <div id="image-zoom-modal" class="zoom-modal hidden">
         <button id="close-zoom-btn" class="close-zoom-btn">✕</button>
         <img id="zoomed-image" src="" alt="확대된 이미지">
+    </div>
+
+    <!-- 방 관리 모달 -->
+    <div id="room-manage-modal" class="zoom-modal hidden" style="align-items: center; justify-content: center; background: rgba(0,0,0,0.8); display: flex;">
+        <div class="glass-card" style="position: relative; z-index: 1000; width: 90%; max-width: 400px; text-align: center; border: 1px solid var(--border);">
+            <button id="close-manage-btn" class="close-zoom-btn" style="position: absolute; top: 1rem; right: 1rem; background: rgba(0,0,0,0.5);">✕</button>
+            <h2 style="margin-bottom: 1.5rem; color: var(--text-main);">👑 방 관리</h2>
+            
+            <div style="background: rgba(0,0,0,0.3); padding: 1.5rem; border-radius: var(--radius); margin-bottom: 1.5rem; border: 1px solid rgba(255,255,255,0.1);">
+                <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 0.5rem;">친구를 초대하려면 아래 코드를 공유하세요.</p>
+                <div style="font-size: 3rem; font-weight: bold; letter-spacing: 5px; color: var(--primary); user-select: text;" id="manage-invite-code">ABCD</div>
+                <button id="copy-code-btn" style="margin-top: 1rem; background: var(--secondary); display: flex; align-items: center; justify-content: center; gap: 0.5rem; width: 100%;">
+                    <span>📋</span> 코드 복사하기
+                </button>
+            </div>
+            
+            <div style="text-align: left;">
+                <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 0.5rem;">방 이름 변경</p>
+                <div style="display: flex; gap: 0.5rem;">
+                    <input type="text" id="manage-room-name-input" placeholder="새 방 이름" style="flex: 1;">
+                    <button id="manage-rename-btn" style="width: auto; white-space: nowrap; padding: 0 1rem;">변경</button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- 보스 키 가짜 화면 (Google Style) -->
